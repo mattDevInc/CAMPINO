@@ -147,4 +147,72 @@ l_set = o3d.geometry.LineSet(points = o3d.utility.Vector3dVector(pts), lines = o
 lg_set = o3d.geometry.LineSet(points = o3d.utility.Vector3dVector(pts_networkxG), lines = o3d.utility.Vector2iVector(lines_g))
 o3d.io.write_line_set("./CAMPINO_skel.ply", l_set)
 
-o3d.visualization.draw_geometries([l_set])
+#o3d.visualization.draw_geometries([l_set])
+
+
+def prune_short_branches(tree, min_length=3):
+    """
+    Iteratively remove leaves (degree-1 nodes) that belong to 
+    branches shorter than min_length.
+    """
+    T = tree.copy()
+    
+    while True:
+        # Find current leaves
+        leaves = [n for n, deg in T.degree() if deg == 1]
+        if not leaves:
+            break
+            
+        removed = False
+        for leaf in leaves:
+            # Walk from the leaf until we hit a junction (deg > 2) or the end
+            path = [leaf]
+            current = leaf
+            prev = None
+            
+            while True:
+                neighbors = list(T.neighbors(current))
+                next_nodes = [n for n in neighbors if n != prev]
+                if len(next_nodes) != 1:
+                    break
+                prev = current
+                current = next_nodes[0]
+                path.append(current)
+                if T.degree(current) > 2:
+                    break
+            
+            # If the branch is too short → remove it
+            if len(path) - 1 < min_length:          # number of edges
+                T.remove_nodes_from(path[:-1])      # keep the junction
+                removed = True
+        
+        if not removed:
+            break
+    
+    return T
+
+# pruned = prune_short_branches(spanning_tree, min_length=2)
+# pts = []
+# for i in range(len(pruned.nodes)) :
+#     pts.append(pruned.nodes[i]["center"])
+
+# lines = [l for l in pruned.edges]
+# p_set = o3d.geometry.LineSet(points = o3d.utility.Vector3dVector(pts), lines = o3d.utility.Vector2iVector(lines))
+# o3d.visualization.draw_geometries([p_set])
+
+def get_tree_diameter_path(tree):
+    """Return the longest path (list of node indices) in the tree."""
+    # Two BFS are enough for a tree
+    def farthest_node(start):
+        lengths = nx.single_source_shortest_path_length(tree, start)
+        return max(lengths, key=lengths.get)
+    
+    u = farthest_node(list(tree.nodes())[0])
+    v = farthest_node(u)
+    return nx.shortest_path(tree, u, v)
+
+main_path = get_tree_diameter_path(spanning_tree)
+#m_line = helpers.convert_points_to_pcd(main_path)
+#o3d.visualization.drawGeometries([main_path])
+
+o3d.io.write_point_cloud("./y.ply", pcd)
