@@ -145,10 +145,77 @@ lines = [l for l in spanning_tree.edges]
 lines_g = [l for l in G.edges]
 l_set = o3d.geometry.LineSet(points = o3d.utility.Vector3dVector(pts), lines = o3d.utility.Vector2iVector(lines))
 lg_set = o3d.geometry.LineSet(points = o3d.utility.Vector3dVector(pts_networkxG), lines = o3d.utility.Vector2iVector(lines_g))
-o3d.io.write_line_set("./CAMPINO_skel.ply", l_set)
+# o3d.io.write_line_set("./CAMPINO_skel.ply", l_set)
+# o3d.io.write_line_set("./CAMPINO_graph.ply", lg_set)
 
-#o3d.visualization.draw_geometries([l_set])
+#o3d.visualization.draw_geometries([lg_set])
 
+def point_only_graph_visualization (graph_) :
+    pts = []
+    connections = []
+    # we always end up with an uneven number of nodes
+    colors = [0, 1, 0] * (2 * len(graph_.edges) - 1)
+    visited = set()
+
+    iter = [e for e in graph_.edges]
+    for p in range(len(iter)) :
+        og_node0 = iter[p][0]
+        og_node1 = iter[p][1]
+
+        if (not og_node0 in visited or not og_node1 in visited) :
+            visited.add(og_node0)
+            visited.add(og_node1)
+
+            nd1 = graph_.nodes[og_node0]["center"]
+            nd2 = graph_.nodes[og_node1]["center"]
+            # calculate midpoint
+            midpoint = np.array([(nd1[0] + nd2[0]) / 2, (nd1[1] + nd2[1]) / 2, (nd1[2] + nd2[2]) / 2])
+            pts.append(nd1)
+            pts.append(midpoint)
+            col_index = len(pts) - 1
+            pts.append(nd2)
+            midpoint_id = p + 1000 # this might cause problems lel
+            # create new connections
+            con1 = [og_node0, midpoint_id]
+            con2 = [midpoint_id, og_node1]
+            connections.append(con1)
+            connections.append(con2)
+            colors[col_index] = [1, 0, 0]
+        elif (og_node0 in visited) :
+            visited.add(og_node1)
+            
+            nd1 = graph_.nodes[og_node0]["center"]
+            nd2 = graph_.nodes[og_node1]["center"]
+            # calculate midpoint
+            midpoint = np.array([(nd1[0] + nd2[0]) / 2, (nd1[1] + nd2[1]) / 2, (nd1[2] + nd2[2]) / 2])
+            pts.append(midpoint)
+            col_index = len(pts) - 1
+            pts.append(nd2)
+            midpoint_id = p + 1000 # this might cause problems lel
+            # create new connections
+            con2 = [midpoint_id, og_node1]
+            connections.append(con2)
+            colors[col_index] = [1, 0, 0]
+        elif (og_node1 in visited) :
+            visited.add(og_node0)
+            nd1 = graph_.nodes[og_node0]["center"]
+            nd2 = graph_.nodes[og_node1]["center"]
+            # calculate midpoint
+            midpoint = np.array([(nd1[0] + nd2[0]) / 2, (nd1[1] + nd2[1]) / 2, (nd1[2] + nd2[2]) / 2])
+            pts.append(midpoint)
+            col_index = len(pts) - 1
+            pts.append(nd1)
+            midpoint_id = p + 1000 # this might cause problems lel
+            # create new connections
+            con1 = [midpoint_id, og_node0]
+            connections.append(con1)
+            colors[col_index] = [1, 0, 0]
+
+
+    return o3d.geometry.LineSet(points = o3d.utility.Vector3dVector(pts), lines = o3d.utility.Vector2iVector(connections))
+            
+lines_debug = point_only_graph_visualization(G)
+o3d.io.write_line_set("./lines_debug.ply", lines_debug)
 
 def prune_short_branches(tree, min_length=3):
     """
@@ -181,7 +248,7 @@ def prune_short_branches(tree, min_length=3):
                 if T.degree(current) > 2:
                     break
             
-            # If the branch is too short → remove it
+            # If the branch is too short  remove it
             if len(path) - 1 < min_length:          # number of edges
                 T.remove_nodes_from(path[:-1])      # keep the junction
                 removed = True
@@ -215,4 +282,4 @@ main_path = get_tree_diameter_path(spanning_tree)
 #m_line = helpers.convert_points_to_pcd(main_path)
 #o3d.visualization.drawGeometries([main_path])
 
-o3d.io.write_point_cloud("./y.ply", pcd)
+#o3d.io.write_point_cloud("./y.ply", pcd)
