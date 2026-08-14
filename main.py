@@ -6,20 +6,11 @@ from collections import defaultdict
 
 import helpers
 
-pcd = o3d.io.read_point_cloud(r"./cropped_downsampled.pcd")
+def imports () :
+    pcd = o3d.io.read_point_cloud("./cropped.pcd")
+    return pcd
 
-# for k in range(6) :
-#     pcd = pcd.uniform_down_sample(2)
-# print(np.asarray(pcd.points).shape)
-
-pcd_octree = o3d.geometry.Octree(max_depth = 3)
-pcd_octree.convert_from_point_cloud(pcd)
-
-leaf_nodes = [] # [geom_center, size, origin, density_center, points]
-leaf_node_centers = []
-
-# traversal of the octree
-def f_traverse(node, node_info):
+def ftraverse_verbose (node, node_info) :
     early_stop = False
     if isinstance(node, o3d.geometry.OctreeInternalNode):
         if isinstance(node, o3d.geometry.OctreeInternalPointNode):
@@ -27,259 +18,62 @@ def f_traverse(node, node_info):
             for child in node.children:
                 if child is not None:
                     n += 1
-            #print("{}{}: Internal node at depth {} has {} children and {} points ({})".format('    ' * node_info.depth, node_info.child_index, node_info.depth, n, len(node.indices), node_info.origin))
-
-            # we only want to process nodes / spatial regions with enough points
+            print("{}{}: Internal node at depth {} has {} children and {} points ({}), size={}".format('    ' * node_info.depth, node_info.child_index, node_info.depth, n, len(node.indices), node_info.origin, node_info.size))
             early_stop = len(node.indices) < 250
     elif isinstance(node, o3d.geometry.OctreeLeafNode):
         if isinstance(node, o3d.geometry.OctreePointColorLeafNode):
-            geom_center = node_info.origin + 0.5 * node_info.size
-            # let's try a centroid of the points inside the leaf, rather than it's geometric center
-            # ok that does not work, lel, we need something else
-            density_centroid = np.ones(3)
-            comp_x = 0
-            comp_y = 0
-            comp_z = 0
-            pcd_pts = np.asarray(pcd.points)
-            for i in node.indices :
-                comp_x += pcd_pts[i][0]
-                comp_y += pcd_pts[i][1]
-                comp_z += pcd_pts[i][2]
-
-            density_centroid[0] = comp_x / len(pcd_pts)
-            density_centroid[1] = comp_y / len(pcd_pts)
-            density_centroid[2] = comp_z / len(pcd_pts)
-
-            #print("{}{}: Leaf node at depth {} has {} points with center {}".format('    ' * node_info.depth, node_info.child_index,node_info.depth, len(node.indices),geom_center))
-            leaf_nodes.append([geom_center, node_info.size, node_info.origin, density_centroid, node.indices])
-            leaf_node_centers.append(geom_center)
+            print("{}{}: Leaf node at depth {} has {} points with origin {}".format('    ' * node_info.depth, node_info.child_index,node_info.depth, len(node.indices), node_info.origin))
     else:
         raise NotImplementedError('Node type not recognized!')
 
     # early stopping: if True, traversal of children of the current node will be skipped
     return early_stop
 
-pcd_octree.traverse(f_traverse)
-N = len(leaf_node_centers)
-#o3d.visualization.draw_geometries([helpers.conver_points_to_pcd(leaf_node_centers)])
+def extract_octree_leaves (octree_) :
+    leafes = []
 
-
-tree = cKDTree(leaf_node_centers)
-# Search radius = a bit larger than the largest leaf diagonal
-max_size = max(n[1] for n in leaf_nodes)
-radius = max_size * np.sqrt(3) + 1e-6
-
-# indicies in adj and edges correspond to indexes from leaf_node_centers so if there exists a pair (i,j) that forms an edge in the graph than those nodes can be retrieved via those indexes
-adj = defaultdict(list)          # adjacency list
-edges = []                       # list of (i, j) pairs
-
-for i in range(N):
-    # candidates that could possibly touch
-    candidates = tree.query_ball_point(leaf_node_centers[i], r=radius)
-    oi, si = leaf_nodes[i][0], leaf_nodes[i][1]
-    #print(candidates)
-    
-    
-    for j in candidates:
-        if j <= i:
-            continue
-        oj, sj = leaf_nodes[j][0], leaf_nodes[j][1]
+    def ftraverse_extract (node, node_info) :
+        early_stop = False
+        if isinstance(node, o3d.geometry.OctreeInternalNode):
+            if isinstance(node, o3d.geometry.OctreeInternalPointNode):
+                early_stop = len(node.indices) < 250
+        elif isinstance(node, o3d.geometry.OctreeLeafNode):
+            if isinstance(node, o3d.geometry.OctreePointColorLeafNode):
+                leafes.append((node_info.origin, node_info.size))
+        else:
+            raise NotImplementedError('Node type not recognized!')
         
-        # Check face adjacency (touching on a face of positive area)
-        # X-direction
-        if abs((oi[0] + si) - oj[0]) < 1e-8 or abs((oj[0] + sj) - oi[0]) < 1e-8:
-            # Y and Z intervals must overlap with positive length
-            if max(oi[1], oj[1]) < min(oi[1]+si, oj[1]+sj) - 1e-8 and \
-               max(oi[2], oj[2]) < min(oi[2]+si, oj[2]+sj) - 1e-8:
-                adj[i].append(j)
-                adj[j].append(i)
-                edges.append((i, j))
-                continue
-        # Y-direction
-        if abs((oi[1] + si) - oj[1]) < 1e-8 or abs((oj[1] + sj) - oi[1]) < 1e-8:
-            if max(oi[0], oj[0]) < min(oi[0]+si, oj[0]+sj) - 1e-8 and \
-               max(oi[2], oj[2]) < min(oi[2]+si, oj[2]+sj) - 1e-8:
-                adj[i].append(j)
-                adj[j].append(i)
-                edges.append((i, j))
-                continue
-        # Z-direction
-        if abs((oi[2] + si) - oj[2]) < 1e-8 or abs((oj[2] + sj) - oi[2]) < 1e-8:
-            if max(oi[0], oj[0]) < min(oi[0]+si, oj[0]+sj) - 1e-8 and \
-               max(oi[1], oj[1]) < min(oi[1]+si, oj[1]+sj) - 1e-8:
-                adj[i].append(j)
-                adj[j].append(i)
-                edges.append((i, j))
-#print(edges)
-#print(f"Number of edges: {len(edges)}")
-#print(adj)
+    octree_.traverse(ftraverse_extract)
+    return leafes
 
-G = nx.Graph()
-G.add_nodes_from(range(N))
-G.add_edges_from(edges)
-
-# Attach useful attributes
-for i, leaf in enumerate(leaf_nodes):
-    G.nodes[i]["center"]  = leaf[0]
-    G.nodes[i]["size"]    = leaf[1]
-    G.nodes[i]["origin"]  = leaf[2]
-
-# construct a spanning tree/ forest - this is probably not going to be very close to a skeleton
-# is again a networkx graph
-spanning_tree = nx.minimum_spanning_tree(G)
-# print(nx.is_forest(spanning_tree))
-# print(G.number_of_edges())
-# print(spanning_tree.number_of_edges())
-# print(spanning_tree.nodes[5]["center"])
-
-# constructing lineset from the graph with open3d for debugging
-pts = []
-pts_networkxG = []
-for p in range(len(spanning_tree.nodes)) :
-    pts.append(spanning_tree.nodes[p]["center"])
-
-for p in range(len(G.nodes)) :
-    pts_networkxG.append(spanning_tree.nodes[p]["center"])
-
-lines = [l for l in spanning_tree.edges]
-lines_g = [l for l in G.edges]
-l_set = o3d.geometry.LineSet(points = o3d.utility.Vector3dVector(pts), lines = o3d.utility.Vector2iVector(lines))
-lg_set = o3d.geometry.LineSet(points = o3d.utility.Vector3dVector(pts_networkxG), lines = o3d.utility.Vector2iVector(lines_g))
-# o3d.io.write_line_set("./CAMPINO_skel.ply", l_set)
-# o3d.io.write_line_set("./CAMPINO_graph.ply", lg_set)
-
-#o3d.visualization.draw_geometries([lg_set])
-
-def point_only_graph_visualization (graph_) :
-    pts = []
-    connections = []
-    # we always end up with an uneven number of nodes
-    colors = [0, 1, 0] * (2 * len(graph_.edges) - 1)
-    visited = set()
-
-    iter = [e for e in graph_.edges]
-    for p in range(len(iter)) :
-        og_node0 = iter[p][0]
-        og_node1 = iter[p][1]
-
-        if (not og_node0 in visited or not og_node1 in visited) :
-            visited.add(og_node0)
-            visited.add(og_node1)
-
-            nd1 = graph_.nodes[og_node0]["center"]
-            nd2 = graph_.nodes[og_node1]["center"]
-            # calculate midpoint
-            midpoint = np.array([(nd1[0] + nd2[0]) / 2, (nd1[1] + nd2[1]) / 2, (nd1[2] + nd2[2]) / 2])
-            pts.append(nd1)
-            pts.append(midpoint)
-            col_index = len(pts) - 1
-            pts.append(nd2)
-            midpoint_id = p + 1000 # this might cause problems lel
-            # create new connections
-            con1 = [og_node0, midpoint_id]
-            con2 = [midpoint_id, og_node1]
-            connections.append(con1)
-            connections.append(con2)
-            colors[col_index] = [1, 0, 0]
-        elif (og_node0 in visited) :
-            visited.add(og_node1)
-            
-            nd1 = graph_.nodes[og_node0]["center"]
-            nd2 = graph_.nodes[og_node1]["center"]
-            # calculate midpoint
-            midpoint = np.array([(nd1[0] + nd2[0]) / 2, (nd1[1] + nd2[1]) / 2, (nd1[2] + nd2[2]) / 2])
-            pts.append(midpoint)
-            col_index = len(pts) - 1
-            pts.append(nd2)
-            midpoint_id = p + 1000 # this might cause problems lel
-            # create new connections
-            con2 = [midpoint_id, og_node1]
-            connections.append(con2)
-            colors[col_index] = [1, 0, 0]
-        elif (og_node1 in visited) :
-            visited.add(og_node0)
-            nd1 = graph_.nodes[og_node0]["center"]
-            nd2 = graph_.nodes[og_node1]["center"]
-            # calculate midpoint
-            midpoint = np.array([(nd1[0] + nd2[0]) / 2, (nd1[1] + nd2[1]) / 2, (nd1[2] + nd2[2]) / 2])
-            pts.append(midpoint)
-            col_index = len(pts) - 1
-            pts.append(nd1)
-            midpoint_id = p + 1000 # this might cause problems lel
-            # create new connections
-            con1 = [midpoint_id, og_node0]
-            connections.append(con1)
-            colors[col_index] = [1, 0, 0]
-
-
-    return o3d.geometry.LineSet(points = o3d.utility.Vector3dVector(pts), lines = o3d.utility.Vector2iVector(connections))
-            
-lines_debug = point_only_graph_visualization(G)
-o3d.io.write_line_set("./lines_debug.ply", lines_debug)
-
-def prune_short_branches(tree, min_length=3):
-    """
-    Iteratively remove leaves (degree-1 nodes) that belong to 
-    branches shorter than min_length.
-    """
-    T = tree.copy()
+def extract_octree_structure (octree_) :
+    oct_struct = dict()
     
-    while True:
-        # Find current leaves
-        leaves = [n for n, deg in T.degree() if deg == 1]
-        if not leaves:
-            break
-            
-        removed = False
-        for leaf in leaves:
-            # Walk from the leaf until we hit a junction (deg > 2) or the end
-            path = [leaf]
-            current = leaf
-            prev = None
-            
-            while True:
-                neighbors = list(T.neighbors(current))
-                next_nodes = [n for n in neighbors if n != prev]
-                if len(next_nodes) != 1:
-                    break
-                prev = current
-                current = next_nodes[0]
-                path.append(current)
-                if T.degree(current) > 2:
-                    break
-            
-            # If the branch is too short  remove it
-            if len(path) - 1 < min_length:          # number of edges
-                T.remove_nodes_from(path[:-1])      # keep the junction
-                removed = True
+
+    def ftraverse_extract (node, node_info) :
+        early_stop = False
+        if isinstance(node, o3d.geometry.OctreeInternalNode):
+            if isinstance(node, o3d.geometry.OctreeInternalPointNode):
+                #oct_sctruct[]
+                early_stop = len(node.indices) < 250
+        elif isinstance(node, o3d.geometry.OctreeLeafNode):
+            if isinstance(node, o3d.geometry.OctreePointColorLeafNode):
+                #leafes.append((node_info.origin, node_info.size))
+                raise NotImplementedError('not implemented')
+        else:
+            raise NotImplementedError('Node type not recognized!')
         
-        if not removed:
-            break
-    
-    return T
+    octree_.traverse(ftraverse_extract)
 
-# pruned = prune_short_branches(spanning_tree, min_length=2)
-# pts = []
-# for i in range(len(pruned.nodes)) :
-#     pts.append(pruned.nodes[i]["center"])
 
-# lines = [l for l in pruned.edges]
-# p_set = o3d.geometry.LineSet(points = o3d.utility.Vector3dVector(pts), lines = o3d.utility.Vector2iVector(lines))
-# o3d.visualization.draw_geometries([p_set])
 
-def get_tree_diameter_path(tree):
-    """Return the longest path (list of node indices) in the tree."""
-    # Two BFS are enough for a tree
-    def farthest_node(start):
-        lengths = nx.single_source_shortest_path_length(tree, start)
-        return max(lengths, key=lengths.get)
-    
-    u = farthest_node(list(tree.nodes())[0])
-    v = farthest_node(u)
-    return nx.shortest_path(tree, u, v)
+def main () :
+    pcd = imports()
+    pcd_octree = o3d.geometry.Octree(max_depth = 2)
+    pcd_octree.convert_from_point_cloud(pcd)
+    leaf_nodes = extract_octree_leaves(pcd_octree)
+    extract_octree_structure(pcd_octree)
 
-main_path = get_tree_diameter_path(spanning_tree)
-#m_line = helpers.convert_points_to_pcd(main_path)
-#o3d.visualization.drawGeometries([main_path])
+if __name__ == "__main__" :
+    main()
 
-#o3d.io.write_point_cloud("./y.ply", pcd)
