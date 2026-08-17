@@ -7,7 +7,7 @@ from collections import defaultdict
 import helpers
 
 def imports () :
-    pcd = o3d.io.read_point_cloud("./cropped.pcd")
+    pcd = o3d.io.read_point_cloud("./cropped_downsampled.pcd")
     return pcd
 
 def ftraverse_verbose (node, node_info) :
@@ -177,7 +177,7 @@ def main () :
     pcd_octree = o3d.geometry.Octree(max_depth = 5)
     pcd_octree.convert_from_point_cloud(pcd)
     leaf_nodes = extract_centers(pcd_octree)
-    #pcd_octree.traverse(ftraverse_verbose)
+    pcd_octree.traverse(ftraverse_verbose)
     dual_g_ = dual_graph(leaf_nodes)
     debug_graph_lines = helpers.line_set_from_graph(dual_g_)
     #o3d.visualization.draw_geometries([debug_graph_lines])
@@ -186,6 +186,7 @@ def main () :
     dual_g_M_T = helpers.M_T_graph(pts_only, 0.5 * leaf_nodes[0][2])
     debug_M_T = helpers.line_set_from_graph(dual_g_M_T)
     o3d.visualization.draw_geometries([debug_M_T, pts_only])
+    np.save("./hornitos_pts.npy", np.asarray(pcd.points))
     
     #leaf_ctr_pts = helpers.convert_points_to_pcd(leaf_nodes)
     # leaf_origins = [n[0] for n in leaf_nodes]
